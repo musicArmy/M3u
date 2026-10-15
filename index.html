@@ -1,0 +1,274 @@
+
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M3U Playlist Extractor</title>
+<style>
+body {
+  margin: 0;
+  padding: 16px;
+  font-family: Arial, sans-serif;
+  background: #071323;
+  color: white;
+}
+.container {
+  max-width: 900px;
+  margin: auto;
+}
+.card {
+  background: #12223a;
+  padding: 16px;
+  border-radius: 14px;
+  margin-bottom: 15px;
+}
+h1 { color: #46b6ff; }
+input, textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  margin: 7px 0;
+  border-radius: 8px;
+  border: 1px solid #456080;
+  background: #081629;
+  color: white;
+}
+textarea { min-height: 140px; }
+button {
+  border: 0;
+  padding: 11px 14px;
+  margin: 4px 2px;
+  border-radius: 8px;
+  background: #087ef5;
+  color: white;
+  cursor: pointer;
+}
+.channel {
+  padding: 12px 0;
+  border-bottom: 1px solid #34465f;
+  overflow-wrap: anywhere;
+}
+.channel a { color: #69d5ff; }
+.small { color: #b9c9df; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <h1>📺 M3U Extractor</h1>
+    <p>Playlist URL डालो या उसका टेक्स्ट पेस्ट करो।</p>
+
+    <input id="url" placeholder="M3U Playlist URL">
+
+    <button onclick="loadURL()">URL से Extract</button>
+
+    <textarea id="source"
+      placeholder="#EXTM3U&#10;#EXTINF:-1,Channel Name&#10;https://example.com/live.m3u8"></textarea>
+
+    <button onclick="extract()">Extract Channels</button>
+    <button onclick="clearAll()">Clear</button>
+    <p id="status" class="small"></p>
+  </div>
+
+  <div class="card">
+    <h2>निकले हुए चैनल</h2>
+    <input id="search" placeholder="चैनल खोजें..." oninput="render()">
+    <p id="count">कुल चैनल: 0</p>
+    <button onclick="copyAll()">सभी लिंक कॉपी</button>
+    <button onclick="downloadTXT()">TXT डाउनलोड</button>
+    <button onclick="downloadM3U()">M3U डाउनलोड</button>
+    <div id="results"></div>
+  </div>
+</div>
+
+<script>
+let channels = [];
+
+function parseM3U(text) {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const output = [];
+  let info = "";
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    if (line.startsWith("#EXTINF")) {
+      info = line;
+    } else if (line.startsWith("#EXTGRP:")) {
+      // Group metadata is retained in the original playlist.
+    } else if (!line.startsWith("#") &&
+               /^https?:\/\//i.test(line)) {
+      let name = "Channel " + (output.length + 1);
+
+      if (info) {
+        const comma = info.indexOf(",");
+        if (comma >= 0 && info.slice(comma + 1).trim()) {
+          name = info.slice(comma + 1).trim();
+        }
+      }
+
+      output.push({
+        name,
+        url: line,
+        info
+      });
+      info = "";
+    }
+  }
+  return output;
+}
+
+function extract() {
+  const text = document.getElementById("source").value.trim();
+
+  if (!text) {
+    status("पहले playlist का टेक्स्ट पेस्ट करो।");
+    return;
+  }
+
+  channels = parseM3U(text);
+  render();
+  status(channels.length + " चैनल मिले।");
+}
+
+async function loadURL() {
+  const url = document.getElementById("url").value.trim();
+
+  if (!url) {
+    status("पहले playlist URL डालो।");
+    return;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("केवल HTTP/HTTPS URL इस्तेमाल करो।");
+    }
+
+    status("Playlist लोड हो रही है...");
+    const response = await fetch(parsed.href);
+
+    if (!response.ok) {
+      throw new Error("HTTP " + response.status);
+    }
+
+    document.getElementById("source").value =
+      await response.text();
+
+    extract();
+  } catch (error) {
+    status("URL नहीं खुला। CORS या नेटवर्क प्रतिबंध हो सकता है। " +
+      "अधिकृत playlist का टेक्स्ट कॉपी करके नीचे पेस्ट करो।");
+  }
+}
+
+function status(message) {
+  document.getElementById("status").textContent = message;
+}
+
+function render() {
+  const query = document.getElementById("search")
+    .value.toLowerCase();
+
+  const filtered = channels.filter(c =>
+    (c.name + " " + c.url).toLowerCase().includes(query)
+  );
+
+  document.getElementById("count").textContent =
+    "कुल चैनल: " + channels.length +
+    " | दिख रहे: " + filtered.length;
+
+  const results = document.getElementById("results");
+  results.replaceChildren();
+
+  if (!filtered.length) {
+    results.textContent = "कोई चैनल नहीं मिला।";
+    return;
+  }
+
+  filtered.forEach((c, i) => {
+    const div = document.createElement("div");
+    div.className = "channel";
+
+    const title = document.createElement("b");
+    title.textContent = (i + 1) + ". " + c.name;
+
+    const br = document.createElement("br");
+    const link = document.createElement("a");
+    link.href = c.url;
+    link.textContent = c.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+
+    const copy = document.createElement("button");
+    copy.textContent = "कॉपी लिंक";
+    copy.onclick = () => copyText(c.url);
+
+    div.append(title, br, link, copy);
+    results.append(div);
+  });
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    status("लिंक कॉपी हो गया।");
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+    status("कॉपी करने की कोशिश पूरी हुई।");
+  }
+}
+
+function copyAll() {
+  if (!channels.length) return status("पहले playlist extract करो।");
+  copyText(channels.map(c => c.name + "\n" + c.url).join("\n\n"));
+}
+
+function downloadFile(content, filename) {
+  const blob = new Blob([content], {
+    type: "text/plain;charset=utf-8"
+  });
+  const a = document.createElement("a");
+  const objectURL = URL.createObjectURL(blob);
+  a.href = objectURL;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(objectURL), 1000);
+}
+
+function downloadTXT() {
+  if (!channels.length) return status("पहले playlist extract करो।");
+  downloadFile(
+    channels.map(c => c.name + "\t" + c.url).join("\n"),
+    "channels.txt"
+  );
+}
+
+function downloadM3U() {
+  if (!channels.length) return status("पहले playlist extract करो।");
+  downloadFile(
+    "#EXTM3U\n" +
+    channels.map(c => (c.info || "#EXTINF:-1," + c.name) +
+      "\n" + c.url).join("\n") + "\n",
+    "extracted.m3u"
+  );
+}
+
+function clearAll() {
+  channels = [];
+  document.getElementById("url").value = "";
+  document.getElementById("source").value = "";
+  document.getElementById("search").value = "";
+  render();
+  status("साफ हो गया।");
+}
+</script>
+</body>
+</html>
